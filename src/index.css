@@ -1,0 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Ephesis&display=swap"); /* Ephesis */
+@import "tailwindcss";
+:root {
+  font-family: "arial";
+}
