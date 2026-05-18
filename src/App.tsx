@@ -1,40 +1,12 @@
-import React, { useState, useCallback } from "react";
-import {
-  ReactFlow,
-  applyNodeChanges,
-  applyEdgeChanges,
-  addEdge,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { Album, GitBranch, Play, Shell, Trash, Trash2 } from "lucide-react";
-
-const initialNodes = [
-  { id: "n1", position: { x: 0, y: 0 }, data: { label: "Node 1" } },
-  { id: "n2", position: { x: 0, y: 100 }, data: { label: "Node 2" } },
-];
-
-const initialEdges = [{ id: "n1-n2", source: "n1", target: "n2" }];
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Album, GitBranch, Play, Shell, Trash } from "lucide-react";
+import SourcePage from "./pages/SourcePage";
+import WorkflowPage from "./pages/WorkflowPage";
 
 export default function App() {
   const [currTab, setCurrTab] = useState<"sourcePage" | "workflowPage">(
     "sourcePage",
-  );
-  const [nodes, setNodes] = useState(initialNodes);
-  const [edges, setEdges] = useState(initialEdges);
-
-  const onNodesChange = useCallback(
-    (changes) =>
-      setNodes((nodesSnapshot) => applyNodeChanges(changes, nodesSnapshot)),
-    [],
-  );
-  const onEdgesChange = useCallback(
-    (changes) =>
-      setEdges((edgesSnapshot) => applyEdgeChanges(changes, edgesSnapshot)),
-    [],
-  );
-  const onConnect = useCallback(
-    (params) => setEdges((edgesSnapshot) => addEdge(params, edgesSnapshot)),
-    [],
   );
 
   return (
@@ -47,6 +19,19 @@ export default function App() {
           <Shell size={50} />
           <h3 className="font-bold text-5xl font-['Ephesis']">Coral Reefs</h3>
         </div>
+        <AnimatePresence mode="wait">
+          <motion.h1
+            key={currTab} // Crucial: Tells React this is a new element when the tab changes
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="font-bold text-5xl font-['Ephesis'] text-blue-400"
+          >
+            {currTab[0].toUpperCase() + currTab.slice(1, -4) + " Page"}
+          </motion.h1>
+        </AnimatePresence>
+
         <div className="BUTTONCONTAINER flex p-5 gap-2.5">
           <button className="group px-5 py-2 cursor-pointer bg-linear-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-emerald-500/50 flex items-center gap-2 border border-emerald-400/50 hover:border-emerald-400 hover:shadow-emerald-500/70">
             <Play size={20} fill="white" stroke="none" />
@@ -58,29 +43,27 @@ export default function App() {
           </button>
         </div>
       </header>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        fitView
-      />
+      {currTab === "sourcePage" ? <SourcePage /> : <WorkflowPage />}
       <footer className="absolute flex left-1/2 -translate-x-1/2 bottom-4 bg-white/30 backdrop-blur-md border border-white/40 shadow-lg rounded-2xl ">
         <button
           onClick={() => setCurrTab("sourcePage")}
-          className={`flex justify-center items-center h-14 w-32 rounded-l-2xl cursor-pointer transition-all duration-500 ${currTab === "sourcePage" && "bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.7)]"} hover:bg-white hover:shadow-[0_0_20px_rgba(255,255,255,1)]`}
+          className={`flex relative group justify-center items-center h-14 w-32 rounded-l-2xl cursor-pointer transition-all duration-500 ${currTab === "sourcePage" && "bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.7)]"} hover:bg-white hover:shadow-[0_0_20px_rgba(255,255,255,1)]`}
         >
+          <span className="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-1 bg-white text-black text-xs font-semibold rounded-lg opacity-0 translate-y-2 pointer-events-none transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 shadow-lg whitespace-nowrap">
+            Source Playground
+          </span>
           <GitBranch
             size={30}
             stroke={currTab === "sourcePage" ? "#000000" : "#808080"}
           />
         </button>
-        {/* <div className="h-14 w-0.5 bg-white/20" /> */}
         <button
           onClick={() => setCurrTab("workflowPage")}
-          className={`flex justify-center items-center h-14 w-32 rounded-r-2xl cursor-pointer transition-all duration-500 ${currTab === "workflowPage" && "bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.7)]"} hover:bg-white hover:shadow-[0_0_20px_rgba(255,255,255,1)]`}
+          className={`flex relative group justify-center items-center h-14 w-32 rounded-r-2xl cursor-pointer transition-all duration-500 ${currTab === "workflowPage" && "bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.7)]"} hover:bg-white hover:shadow-[0_0_20px_rgba(255,255,255,1)]`}
         >
+          <span className="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-1 bg-white text-black text-xs font-semibold rounded-lg opacity-0 translate-y-2 pointer-events-none transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 shadow-lg whitespace-nowrap">
+            workflow playground
+          </span>
           <Album
             size={30}
             stroke={currTab === "workflowPage" ? "#000000" : "#808080"}
