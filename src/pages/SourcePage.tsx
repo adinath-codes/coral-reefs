@@ -7,7 +7,6 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
-  useReactFlow,
   type Node,
   type Edge,
   type NodeChange,
@@ -19,8 +18,6 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  Play,
-  Trash,
   ChevronDown,
   Plus,
   Grid,
@@ -38,29 +35,10 @@ import {
   nodeOptions,
   HORIZONTAL_BRANCH_SPACING,
 } from "../utils/constants";
-import clusterToJSON from "../utils/clusterToJSON";
 import NodeConfigPanel, {
   type t_CustomNodeData,
 } from "../components/NodeSidePanel";
-import { ClusterIDProvider, useClusterID } from "../memory/ClusterIDContext";
-
-const FindExecType = (nodes: Node<t_CustomNodeData>[]) => {
-  const execType = nodes.reduce(
-    (type: string | null, node: Node<t_CustomNodeData>) => {
-      if (node.type === "dataset") {
-        return "train";
-      } else if (node.type === "evaluation") {
-        return "evaluate";
-      } else if (node.type === "rlconfig") {
-        return "rlhf";
-      }
-      return type;
-    },
-    null,
-  );
-  console.log("Determined Execution Type:", execType);
-  return execType;
-};
+import { ClusterIDProvider } from "../memory/ClusterIDContext";
 
 let nodeIdCounter = 12;
 
@@ -86,19 +64,14 @@ const useExecutionState = () => {
 };
 
 const SourcePageContent = () => {
-  const instance = useReactFlow<Node<t_CustomNodeData>, Edge>();
+  // const instance = useReactFlow<Node<t_CustomNodeData>, Edge>();
 
   const [xPos, setXPos] = useState<number>(() => Math.random() * 800 + 100);
   const [yPos, setYPos] = useState<number>(() => Math.random() * 400 + 500);
-  const { setCurrentClusterID } = useClusterID();
+  // const { setCurrentClusterID } = useClusterID();
   const { nodes, setNodes, onNodesChange, edges, setEdges, onEdgesChange } =
     useFlowStates(initialNodes, initialEdges);
-  const {
-    executingParentIds,
-    setExecutingParentIds,
-    isExecuting,
-    setIsExecuting,
-  } = useExecutionState();
+  const { executingParentIds, setExecutingParentIds } = useExecutionState();
 
   const [selectedNode, setSelectedNode] =
     useState<Node<t_CustomNodeData> | null>(null);
@@ -248,100 +221,6 @@ const SourcePageContent = () => {
     },
     [executingParentIds, setExecutingParentIds, edges, setEdges, setNodes],
   );
-
-  const handleMassRun = useCallback(async () => {
-    const parentIds = nodes
-      .filter((n) => n.type === "dataset")
-      .map((n) => n.id);
-    parentIds.forEach((id) => handleExecuteParentWorkflow(id));
-    setIsExecuting(true);
-    setEdges((eds) =>
-      eds.map((edge) => {
-        return { ...edge, animated: true };
-      }),
-    );
-    try {
-      const execType = FindExecType(instance.getNodes());
-      // let response = null;
-      const JSONdata = clusterToJSON(
-        instance as unknown as Parameters<typeof clusterToJSON>[0],
-      );
-      if (execType === "train") {
-        console.log(
-          "Sending Cluster Data to API:",
-          instance.getNodes(),
-          JSONdata,
-        );
-        setCurrentClusterID(JSON.parse(JSONdata).clusterID);
-        setNodes((nds) =>
-          nds.map((node) => {
-            if (node.type === "mloutput") {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  clusterID: JSON.parse(JSONdata).clusterID,
-                },
-              };
-            }
-            return node;
-          }),
-        );
-      } else if (execType === "evaluate") {
-        // ... handled logic
-      } else if (execType === "rlhf") {
-        // ... handled logic
-      }
-    } catch (error) {
-      console.error("Mass Run Failed:", error);
-    }
-    setEdges((eds) =>
-      eds.map((edge) => {
-        return { ...edge, animated: false };
-      }),
-    );
-    setIsExecuting(false);
-  }, [
-    nodes,
-    setIsExecuting,
-    setEdges,
-    handleExecuteParentWorkflow,
-    instance,
-    setCurrentClusterID,
-    setNodes,
-  ]);
-
-  const handleMassDeleteClusterGlobal = useCallback(() => {
-    if (
-      !confirm(
-        "Are you sure you want to delete ALL Parent Prompts and their descendants? This action cannot be undone.",
-      )
-    ) {
-      return;
-    }
-
-    const parentNodes = nodes.filter((n) => n.type === "dataset");
-
-    const allNodesToDelete: string[] = [];
-    const allEdgesToDelete: string[] = [];
-
-    parentNodes.forEach((parentNode) => {
-      allNodesToDelete.push(parentNode.id);
-      const { nodeIds, edgeIds } = findBranchNodesAndEdges(
-        parentNode.id,
-        edges,
-      );
-      allNodesToDelete.push(...nodeIds);
-      allEdgesToDelete.push(...edgeIds);
-    });
-
-    const uniqueNodesToDelete = Array.from(new Set(allNodesToDelete));
-    const uniqueEdgesToDelete = Array.from(new Set(allEdgesToDelete));
-
-    setNodes((nds) => nds.filter((n) => !uniqueNodesToDelete.includes(n.id)));
-    setEdges((eds) => eds.filter((e) => !uniqueEdgesToDelete.includes(e.id)));
-    setSelectedNode(null);
-  }, [nodes, edges, setNodes, setEdges]);
 
   // Add New Node logic remains the same
   const addNewNode = (type: string) => {
@@ -557,34 +436,6 @@ const SourcePageContent = () => {
               <span className="text-gray-400">Edges</span>
             </div>
           </div>
-
-          {/* Existing Delete All Button */}
-          <button
-            onClick={handleMassDeleteClusterGlobal}
-            className="group px-4 py-2 bg-linear-to-r from-red-600/80 to-red-700/80 hover:from-red-600 hover:to-red-700 disabled:from-gray-700/50 disabled:to-gray-700/50 text-white rounded-xl transition-all duration-200 text-sm font-semibold shadow-lg shadow-red-500/30 flex items-center gap-2 border border-red-500/30 hover:border-red-500/50 hover:shadow-red-500/50"
-            disabled={isExecuting}
-          >
-            <Trash className="w-4 h-4 group-hover:animate-bounce" />
-            Clear All
-          </button>
-
-          <button
-            onClick={handleMassRun}
-            disabled={isExecuting}
-            className="group px-5 py-2 bg-linear-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-emerald-500/50 flex items-center gap-2 border border-emerald-400/50 hover:border-emerald-400 hover:shadow-emerald-500/70"
-          >
-            {isExecuting ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                Executing...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
-                Execute All
-              </>
-            )}
-          </button>
         </div>
       </div>
 
