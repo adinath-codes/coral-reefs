@@ -1,0 +1,16 @@
+[project]
+name = "coral-reef-bk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=1.5.9",
+    "fastapi>=0.136.3",
+    "google-genai>=2.7.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "sentence-transformers>=5.5.1",
+    "uvicorn>=0.48.0",
+]

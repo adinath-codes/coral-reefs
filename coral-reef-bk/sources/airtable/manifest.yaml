@@ -1,0 +1,32 @@
+name: airtable
+version: 1.0.0
+dsl_version: 3
+backend: http
+inputs:
+  API_KEY:
+    kind: secret
+base_url: https://api.airtable.com/v0
+auth:
+  type: HeaderAuth
+  headers:
+  - name: Authorization
+    from: template
+    template: Bearer {{input.API_KEY}}
+tables:
+- name: Employees
+  description: Data mapping for Employees
+  request:
+    method: GET
+    path: appIJmDl1oenGZTlW/Employees
+  columns:
+  - name: id
+    type: Utf8
+  - name: fields
+    type: Json
+  pagination:
+    cursor_param: offset
+  response:
+    rows_path:
+    - records
+test_queries:
+- SELECT * FROM airtable."Employees" LIMIT 5
