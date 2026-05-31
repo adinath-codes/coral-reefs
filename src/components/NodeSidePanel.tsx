@@ -1,220 +1,539 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
-import { X, Settings, Trash } from "lucide-react";
-import { nodeOptions } from "../utils/constants";
+import React from "react";
 import type { Node } from "@xyflow/react";
-export type t_validNodeValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | unknown[]
-  | ((parentNodeId: string) => void);
-export interface t_CustomNodeData {
-  label?: string;
-  description?: string;
-  status?: string;
 
-  HFdataset?: string;
-  basemodel?: string;
-  modelLink?: string | null;
-  clusterID?: number | null;
+// 1. Export the generic type so the rest of the app can use it safely
+export type t_CustomNodeData = Record<string, unknown>;
 
-  onExecute?: (parentNodeId: string) => void;
-  isRunning?: boolean;
-
-  [key: string]:
-    | string
-    | number
-    | boolean
-    | null
-    | undefined
-    | unknown[]
-    | ((parentNodeId: string) => void);
+interface NodeSidePanelProps {
+  selectedNode: Node<t_CustomNodeData> | undefined;
+  setNodes: React.Dispatch<React.SetStateAction<Node<t_CustomNodeData>[]>>;
 }
 
-interface NodeConfigPanelProps {
-  node: Node<t_CustomNodeData> | null;
-  setNodes: Dispatch<SetStateAction<Node<t_CustomNodeData>[]>>;
-  setSelectedNode: Dispatch<SetStateAction<Node<t_CustomNodeData> | null>>;
-  handleSimulateMerge?: () => void;
-  handleCopyToClipboard?: (content: string) => void;
-  handleDownloadVideo?: (url: string) => void;
-}
-
-const NodeConfigPanel = ({
-  node,
+export default function NodeSidePanel({
+  selectedNode,
   setNodes,
-  setSelectedNode,
-}: NodeConfigPanelProps) => {
-  const [localData, setLocalData] = useState<t_CustomNodeData>(
-    node?.data || {},
-  );
+}: NodeSidePanelProps) {
+  // If no node is clicked, show an empty state
+  if (!selectedNode) {
+    return (
+      <div className="w-80 h-full bg-gray-900 border-l border-gray-700 p-6 flex flex-col items-center justify-center text-gray-500 shadow-2xl">
+        <div className="text-4xl mb-4">🖱️</div>
+        <p className="text-center text-sm">
+          Select a node on the canvas to configure its properties.
+        </p>
+      </div>
+    );
+  }
 
-  if (!node) return null;
-
-  const nodeType = node.type;
-
-  const updateLocalData = (field: string, value: t_validNodeValue) => {
-    setLocalData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const persistNodeData = (field: string, value: t_validNodeValue) => {
+  // 2. The universal update function. It safely injects the sidebar inputs back into the canvas node!
+  const updateData = (key: string, value: string) => {
     setNodes((nds) =>
-      nds.map((n) =>
-        n.id === node.id
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                [field]: value,
-              },
-            }
-          : n,
-      ),
+      nds.map((node) => {
+        if (node.id === selectedNode.id) {
+          return { ...node, data: { ...node.data, [key]: value } };
+        }
+        return node;
+      }),
     );
   };
 
-  const handleChange = (field: string, value: t_validNodeValue) => {
-    updateLocalData(field, value);
-    persistNodeData(field, value);
-  };
+  // 3. Render the specific form based on which node is clicked
+  const renderForm = () => {
+    switch (selectedNode.type) {
+      case "webhook_trigger":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Trigger Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-purple-500 transition-colors"
+                placeholder="e.g., GitHub Alert"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+              <p className="text-xs text-purple-300 leading-relaxed">
+                This node acts as the entry point. The incoming HTTP payload
+                will be available as variables (e.g.,{" "}
+                <code className="bg-black/30 px-1 rounded">
+                  {"{{node_1.error_message}}"}
+                </code>
+                ) for downstream nodes.
+              </p>
+            </div>
+          </div>
+        );
 
-  const handleBlur = (field: string) => {
-    persistNodeData(field, localData[field]);
-  };
+      case "coral_sql":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors"
+                placeholder="e.g., Fetch User Data"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                SQL Query
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-blue-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500 h-32 font-mono transition-colors"
+                placeholder="SELECT * FROM users WHERE id = {{node_1.user_id}}"
+                value={(selectedNode.data.query as string) || ""}
+                onChange={(e) => updateData("query", e.target.value)}
+              />
+            </div>
+          </div>
+        );
 
-  const handleDeleteNode = () => {
-    if (
-      confirm(
-        `Are you sure you want to delete the ${nodeType} node: ${localData.label}?`,
-      )
-    ) {
-      setNodes((nds) => nds.filter((n) => n.id !== node.id));
-      setSelectedNode(null);
+      case "vector_search":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-teal-500 transition-colors"
+                placeholder="e.g., Search Runbooks"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Search Query (Semantic)
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-teal-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-teal-500 h-24 font-mono transition-colors"
+                placeholder="{{node_1.error_message}}"
+                value={(selectedNode.data.query as string) || ""}
+                onChange={(e) => updateData("query", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      case "llm_reasoner":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-orange-500 transition-colors"
+                placeholder="e.g., Diagnose Issue"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Prompt / Instructions
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-orange-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-orange-500 h-48 font-mono transition-colors"
+                placeholder="Error reported: {{node_1.error_message}}\n\nFound Documentation:\n{{node_2.context}}\n\nWrite a 2-sentence diagnosis."
+                value={(selectedNode.data.prompt as string) || ""}
+                onChange={(e) => updateData("prompt", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      case "if_condition":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-yellow-500 transition-colors"
+                placeholder="e.g., Is Critical Error?"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Condition Expression
+              </label>
+              <input
+                className="w-full bg-gray-800 text-yellow-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-yellow-500 font-mono transition-colors"
+                placeholder="{{node_3.severity}} == 'CRITICAL'"
+                value={(selectedNode.data.condition as string) || ""}
+                onChange={(e) => updateData("condition", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      case "action_http":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-green-500 transition-colors"
+                placeholder="e.g., Slack Alert"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <div className="w-1/3">
+                <label className="text-xs text-gray-400 block mb-1">
+                  Method
+                </label>
+                <select
+                  className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-green-500"
+                  value={(selectedNode.data.method as string) || "POST"}
+                  onChange={(e) => updateData("method", e.target.value)}
+                >
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                </select>
+              </div>
+              <div className="w-2/3">
+                <label className="text-xs text-gray-400 block mb-1">
+                  Target URL
+                </label>
+                <input
+                  className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-green-500 transition-colors"
+                  placeholder="https://hooks.slack.com/..."
+                  value={(selectedNode.data.url as string) || ""}
+                  onChange={(e) => updateData("url", e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                JSON Body Payload
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-green-200 text-xs p-2 rounded border border-gray-700 outline-none focus:border-green-500 h-32 font-mono transition-colors"
+                placeholder='{"text": "🚨 AI Diagnosis: {{node_3.summary}}"}'
+                value={(selectedNode.data.body as string) || ""}
+                onChange={(e) => updateData("body", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      case "iterator":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Step Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-pink-500 transition-colors"
+                placeholder="e.g., Loop Over Logs"
+                value={(selectedNode.data.name as string) || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Array Variable Path
+              </label>
+              <input
+                className="w-full bg-gray-800 text-pink-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-pink-500 font-mono transition-colors"
+                placeholder="{{node_2.results_array}}"
+                value={(selectedNode.data.array_path as string) || ""}
+                onChange={(e) => updateData("array_path", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+      case "source_head":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Source Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-purple-500 transition-colors"
+                placeholder="e.g., airtable"
+                value={(selectedNode.data.src_name as string) || ""}
+                onChange={(e) => updateData("src_name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Base URL
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-purple-500 transition-colors"
+                placeholder="https://api.airtable.com/v0"
+                value={(selectedNode.data.base_url as string) || ""}
+                onChange={(e) => updateData("base_url", e.target.value)}
+              />
+            </div>
+
+            {/* THE NEW AUTH TOKEN FIELD */}
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Auth Token (Bearer API Key)
+              </label>
+              <input
+                type="password"
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-purple-500 transition-colors"
+                placeholder="Paste your API key here..."
+                value={(selectedNode.data.auth_token as string) || ""}
+                onChange={(e) => updateData("auth_token", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+      case "endpoint":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Table Name
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors"
+                placeholder="e.g., Employees"
+                value={(selectedNode.data.table_name as string) || ""}
+                onChange={(e) => updateData("table_name", e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <div className="w-1/3">
+                <label className="text-xs text-gray-400 block mb-1">
+                  Method
+                </label>
+                <select
+                  className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500"
+                  value={(selectedNode.data.method as string) || "GET"}
+                  onChange={(e) => updateData("method", e.target.value)}
+                >
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+              </div>
+              <div className="w-2/3">
+                <label className="text-xs text-gray-400 block mb-1">
+                  Endpoint Path
+                </label>
+                <input
+                  className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors"
+                  placeholder="/users"
+                  value={(selectedNode.data.endpoint as string) || ""}
+                  onChange={(e) => updateData("endpoint", e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        );
+
+      case "params":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                JSON Parameters
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-yellow-300 text-sm p-2 rounded border border-gray-700 outline-none focus:border-yellow-500 h-32 font-mono transition-colors"
+                placeholder='[{"name": "sort", "exact": "asc"}]'
+                value={(selectedNode.data.params as string) || ""}
+                onChange={(e) => updateData("params", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      case "columns": {
+        const getColumnsArray = () => {
+          const cols = selectedNode.data.columns;
+          if (typeof cols === "string") {
+            try {
+              return JSON.parse(cols);
+            } catch {
+              return [];
+            }
+          }
+          return Array.isArray(cols) ? cols : [];
+        };
+
+        const columnsList = getColumnsArray();
+
+        return (
+          <div className="flex flex-col gap-4">
+            {/* Rows Path Input */}
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Rows Path (Optional)
+              </label>
+              <input
+                className="w-full bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors"
+                placeholder="e.g., records"
+                value={(selectedNode.data.rows_path as string) || ""}
+                onChange={(e) => updateData("rows_path", e.target.value)}
+              />
+            </div>
+
+            {/* The New Dynamic Columns UI */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-gray-400 block font-bold uppercase tracking-wider">
+                  Schema Columns
+                </label>
+                <span className="text-xs text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                  {columnsList.length} fields
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                {columnsList.map((col: any, index: number) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 bg-gray-800/50 p-2 rounded-lg border border-gray-700/50 hover:border-blue-500/30 transition-colors"
+                  >
+                    {/* Column Name Input */}
+                    <input
+                      className="flex-1 bg-gray-900 text-white text-sm p-1.5 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors"
+                      placeholder="e.g., fields.Name"
+                      value={col.name || ""}
+                      onChange={(e) => {
+                        const newCols = [...columnsList];
+                        newCols[index].name = e.target.value;
+                        updateData("columns", newCols);
+                      }}
+                    />
+
+                    {/* Column Type Dropdown */}
+                    <select
+                      className="w-28 bg-gray-900 text-blue-200 text-sm p-1.5 rounded border border-gray-700 outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                      value={col.type || "Utf8"}
+                      onChange={(e) => {
+                        const newCols = [...columnsList];
+                        newCols[index].type = e.target.value;
+                        updateData("columns", newCols);
+                      }}
+                    >
+                      <option value="Utf8">String</option>
+                      <option value="Int64">Integer</option>
+                      <option value="Float64">Float</option>
+                      <option value="Boolean">Boolean</option>
+                      <option value="Json">JSON</option>
+                    </select>
+
+                    {/* Delete Button */}
+                    <button
+                      onClick={() => {
+                        const newCols = columnsList.filter(
+                          (_, i) => i !== index,
+                        );
+                        updateData("columns", newCols);
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                      title="Remove Column"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add Column Button */}
+              <button
+                onClick={() => {
+                  updateData("columns", [
+                    ...columnsList,
+                    { name: "", type: "Utf8" },
+                  ]);
+                }}
+                className="w-full mt-3 flex items-center justify-center gap-2 py-2 border border-dashed border-gray-600 text-gray-400 hover:text-blue-400 hover:border-blue-500/50 hover:bg-blue-500/5 rounded-lg transition-all text-sm font-medium"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                Add Column
+              </button>
+            </div>
+          </div>
+        );
+      }
+      case "test_queries":
+        return (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                Diagnostic Query (SQL)
+              </label>
+              <textarea
+                className="w-full bg-gray-800 text-red-200 text-sm p-2 rounded border border-gray-700 outline-none focus:border-red-500 h-32 font-mono transition-colors"
+                placeholder='SELECT * FROM my_source."Table" LIMIT 5'
+                value={(selectedNode.data.test_query as string) || ""}
+                onChange={(e) => updateData("test_query", e.target.value)}
+              />
+            </div>
+          </div>
+        );
+
+      default:
+        return (
+          <div className="text-gray-500 text-sm italic">
+            Select a valid node.
+          </div>
+        );
     }
   };
 
-  const headerColor =
-    nodeOptions.find((opt) => opt.type === nodeType)?.color || "gray";
-  const HeaderIcon =
-    nodeOptions.find((opt) => opt.type === nodeType)?.icon || Settings;
-
-  const InputField = ({
-    label,
-    field,
-    type = "text",
-  }: {
-    label: string;
-    field: string;
-    type?: string;
-  }) => (
-    <div>
-      <label className="block text-sm font-bold text-gray-300 mb-2">
-        {label}
-      </label>
-      <input
-        type={type}
-        value={(localData[field] as string | number) || ""}
-        onChange={(e) => handleChange(field, e.target.value)}
-        onBlur={() => handleBlur(field)}
-        className="w-full px-4 py-3 bg-gray-800/70 text-white rounded-xl border border-gray-600/50 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200"
-      />
-    </div>
-  );
-
-  const datasetForm = () => (
-    <>
-      <InputField label="Node Label" field="label" />
-      <InputField label="Hugging Face Dataset Link" field="HFdataset" />
-    </>
-  );
-
-  const basemodelForm = () => (
-    <>
-      <InputField label="Node Label" field="label" />
-      <InputField label="Base Model Link/Name" field="basemodel" />
-    </>
-  );
-
-  const mlopForm = () => (
-    <>
-      <InputField label="Node Label" field="label" />
-      <InputField
-        label="Specify local File path (if no cluster ID)"
-        field="modelLink"
-      />
-      <InputField label="clusterID" field="clusterID" type="number" />
-    </>
-  );
-
+  // 4. Return the beautifully styled sidebar wrapper
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-96 bg-gray-900/90 backdrop-blur-xl border-l border-gray-700/50 shadow-2xl shadow-gray-900/50 overflow-y-auto z-10">
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6 border-b border-gray-700/50 pb-4">
-          <div className="flex items-center gap-3">
-            <div
-              className={`p-3 bg-${headerColor}-500/20 rounded-xl border border-${headerColor}-500/50`}
-            >
-              <HeaderIcon className={`w-5 h-5 text-${headerColor}-400`} />
-            </div>
-            <h3 className="text-xl font-bold text-white">
-              {localData.label || "Node Configuration"}
-            </h3>
-          </div>
-          <button
-            onClick={() => setSelectedNode(null)}
-            className="text-gray-400 hover:text-white hover:bg-gray-800 p-2 rounded-full transition-all duration-200"
-            title="Close Panel"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="space-y-6">
-          {(nodeType === "dataset" || nodeType === "promptdataset") &&
-            datasetForm()}
-          {nodeType === "basemodel" && basemodelForm()}
-          {nodeType === "mloutput" && mlopForm()}
-
-          {/* Common Info & Delete */}
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-700/50">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 mb-2">
-                NODE TYPE
-              </label>
-              <div className="px-4 py-3 bg-gray-800/50 text-white rounded-xl border border-gray-700/50 text-sm font-semibold">
-                {node.type}
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-400 mb-2">
-                NODE ID
-              </label>
-              <div className="px-4 py-3 bg-gray-800/50 text-gray-400 rounded-xl border border-gray-700/50 text-sm font-mono truncate">
-                {node.id}
-              </div>
-            </div>
-          </div>
-
-          {/* Delete Button */}
-          <div className="pt-4 border-t border-gray-700/50">
-            <button
-              onClick={handleDeleteNode}
-              className="w-full px-4 py-3 bg-linear-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl transition-all duration-200 font-bold shadow-xl shadow-red-500/30 border border-red-700/50 flex items-center justify-center gap-2"
-            >
-              <Trash className="w-5 h-5" />
-              Delete Node
-            </button>
-          </div>
-        </div>
+    <div className="w-80 bg-gray-900 border-l border-gray-700 h-full p-5 flex flex-col shadow-2xl z-50 overflow-y-auto">
+      <div className="text-lg font-bold text-white mb-6 border-b border-gray-700 pb-3 flex items-center gap-2">
+        {selectedNode.type === "source_head" && "Source Config"}
+        {selectedNode.type === "endpoint" && "Endpoint Config"}
+        {selectedNode.type === "params" && "Parameters"}
+        {selectedNode.type === "columns" && "Column Schema"}
+        {selectedNode.type === "test_queries" && "Diagnostic Query"}
       </div>
+
+      {renderForm()}
     </div>
   );
-};
-
-export default NodeConfigPanel;
+}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Album, GitBranch, Play, Shell, Trash } from "lucide-react";
+import { Album, GitBranch, Shell } from "lucide-react";
 import SourcePage from "./pages/SourcePage";
 import WorkflowPage from "./pages/WorkflowPage";
 
@@ -31,17 +31,6 @@ export default function App() {
             {currTab[0].toUpperCase() + currTab.slice(1, -4) + " Page"}
           </motion.h1>
         </AnimatePresence>
-
-        <div className="BUTTONCONTAINER flex p-5 gap-2.5">
-          <button className="group px-5 py-2 cursor-pointer bg-linear-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-emerald-500/50 flex items-center gap-2 border border-emerald-400/50 hover:border-emerald-400 hover:shadow-emerald-500/70">
-            <Play size={20} fill="white" stroke="none" />
-            <p className="text-white text-lg">Execute</p>
-          </button>
-          <button className="group px-5 py-2 cursor-pointer bg-linear-to-r from-orange-800 to-red-600 hover:from-orange-900 hover:to-red-700 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-orange-500/50 flex items-center gap-2 border border-orange-400/50 hover:border-orange-400 hover:shadow-orange-500/70">
-            <Trash size={20} stroke="white" />
-            <p className="text-white text-lg">Clear All</p>
-          </button>
-        </div>
       </header>
       {currTab === "sourcePage" ? <SourcePage /> : <WorkflowPage />}
       <footer className="absolute flex left-1/2 -translate-x-1/2 bottom-4 bg-white/30 backdrop-blur-md border border-white/40 shadow-lg rounded-2xl ">

@@ -5,9 +5,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  X, // 🚨 IMPORTED: Code icon for CodeBlockNode
-} from "lucide-react";
+import { X } from "lucide-react";
 import type { MouseEvent } from "react";
 const DeleteButtonEdge = ({
   id,

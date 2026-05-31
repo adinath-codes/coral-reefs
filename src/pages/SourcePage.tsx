@@ -12,7 +12,6 @@ import {
   type NodeChange,
   type EdgeChange,
   type Connection,
-  type NodeMouseHandler,
   BackgroundVariant,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -20,12 +19,12 @@ import "@xyflow/react/dist/style.css";
 import {
   ChevronDown,
   Plus,
-  Grid,
   Maximize2,
   Minimize2,
   Eye,
   EyeOff,
-  Workflow,
+  Trash,
+  Sparkles,
 } from "lucide-react";
 import {
   initialEdges,
@@ -33,13 +32,11 @@ import {
   nodeTypes,
   edgeTypes,
   nodeOptions,
-  HORIZONTAL_BRANCH_SPACING,
 } from "../utils/constants";
-import NodeConfigPanel, {
-  type t_CustomNodeData,
-} from "../components/NodeSidePanel";
-import { ClusterIDProvider } from "../memory/ClusterIDContext";
+import NodeSidePanel from "../components/NodeSidePanel";
+import AIModal from "../components/AiModel";
 
+export type t_CustomNodeData = Record<string, unknown>;
 let nodeIdCounter = 12;
 
 const useFlowStates = (
@@ -64,35 +61,170 @@ const useExecutionState = () => {
 };
 
 const SourcePageContent = () => {
-  // const instance = useReactFlow<Node<t_CustomNodeData>, Edge>();
-
-  const [xPos, setXPos] = useState<number>(() => Math.random() * 800 + 100);
-  const [yPos, setYPos] = useState<number>(() => Math.random() * 400 + 500);
-  // const { setCurrentClusterID } = useClusterID();
   const { nodes, setNodes, onNodesChange, edges, setEdges, onEdgesChange } =
     useFlowStates(initialNodes, initialEdges);
   const { executingParentIds, setExecutingParentIds } = useExecutionState();
 
-  const [selectedNode, setSelectedNode] =
-    useState<Node<t_CustomNodeData> | null>(null);
+  const currentSelectedNode = nodes.find((n) => n.selected);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showMiniMap, setShowMiniMap] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  // Translates React Flow state into the FastAPI Coral YAML Schema
+  const compileWorkflow = () => {
+    // 1. Hunt down the specific nodes by their type
+    const sourceNode = nodes.find((n) => n.type === "source_head")?.data || {};
+    const endpointNode = nodes.find((n) => n.type === "endpoint")?.data || {};
+    const columnsNode = nodes.find((n) => n.type === "columns")?.data || {};
+    const testQueriesNode =
+      nodes.find((n) => n.type === "test_queries")?.data || {};
 
-  const handleSimulateMerge = () => {
-    alert("Simulating Merge Operation...");
+    // 2. Safely parse the columns JSON from the textarea
+    let parsedColumns: Record<string, unknown>[] = [];
+    if (columnsNode.columns) {
+      if (typeof columnsNode.columns === "string") {
+        try {
+          parsedColumns = JSON.parse(columnsNode.columns);
+        } catch (error) {
+          console.error("JSON Parsing Error:", error);
+          alert("⚠️ Warning: Legacy Column Schema is not valid JSON.");
+        }
+      } else if (Array.isArray(columnsNode.columns)) {
+        // It's already a clean array from our new side panel UI!
+        parsedColumns = columnsNode.columns;
+      }
+    }
+
+    // 3. Convert comma-separated string into an array (e.g., "records, fields" -> ["records", "fields"])
+    let parsedRowsPath: string[] = [];
+    if (columnsNode.rows_path && typeof columnsNode.rows_path === "string") {
+      parsedRowsPath = columnsNode.rows_path
+        .split(",")
+        .map((path) => path.trim())
+        .filter(Boolean); // Removes empty strings
+    }
+
+    // 4. Handle test queries (split by newlines if the user pasted multiple queries)
+    let parsedTestQueries: string[] = [];
+    if (
+      testQueriesNode.test_query &&
+      typeof testQueriesNode.test_query === "string"
+    ) {
+      parsedTestQueries = testQueriesNode.test_query
+        .split("\n")
+        .map((query) => query.trim())
+        .filter(Boolean);
+    }
+
+    // 5. Assemble the exact JSON schema for the /generate-customsrc-yaml endpoint
+    return {
+      src_name: sourceNode.src_name || "untitled_source",
+      base_url: sourceNode.base_url || "",
+      tables: [
+        {
+          name: endpointNode.table_name || "Untitled_Table",
+          desc: `Data mapping for ${endpointNode.table_name || "custom source"}`,
+          method: endpointNode.method || "GET",
+          endpoint: endpointNode.endpoint || "",
+          columns: parsedColumns,
+          pagination: {
+            cursor_param: "offset", // Default mapped from your dummy payload
+          },
+          rows_path: parsedRowsPath,
+        },
+      ],
+      test_queries: parsedTestQueries,
+    };
   };
+  const handleExecuteAll = async () => {
+    if (nodes.length === 0) {
+      alert("Canvas is empty! Add some nodes first.");
+      return;
+    }
 
-  const handleCopyToClipboard = (content: string) => {
-    navigator.clipboard.writeText(content);
-    alert("Content copied to clipboard!");
+    setIsExecuting(true);
+    const payload = compileWorkflow();
+
+    console.log(
+      "Sending Payload to Backend:",
+      JSON.stringify(payload, null, 2),
+    );
+
+    try {
+      // --- STEP 1: Generate the YAML Configuration ---
+      console.log("Step 1: Generating YAML...");
+      const genResponse = await fetch(
+        "http://localhost:8000/generate-customsrc-yaml",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!genResponse.ok) {
+        const errorData = await genResponse.json();
+        throw new Error(
+          `Generation Failed: ${errorData.detail || "Unknown error"}`,
+        );
+      }
+      console.log("YAML Generated Successfully.");
+
+      // --- STEP 2: Execute the YAML (Run the Test Queries) ---
+      console.log("Step 2: Executing YAML...");
+      const sourceNode = nodes.find((n) => n.type === "source_head");
+      const authToken = (sourceNode?.data?.auth_token as string) || "";
+      const execPayload = {
+        src_name: payload.src_name,
+        auth_token: authToken,
+      };
+
+      const execResponse = await fetch(
+        "http://localhost:8000/execute-customsrc-yaml",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(execPayload),
+        },
+      );
+
+      if (!execResponse.ok) {
+        const errorData = await execResponse.json();
+        throw new Error(
+          `Execution Failed: ${errorData.detail || "Unknown error"}`,
+        );
+      }
+
+      const execResult = await execResponse.json();
+      console.log("Execution Result:", execResult);
+
+      alert("Success! Custom source Created.");
+    } catch (error) {
+      console.error("Workflow Error:", error);
+      // Safely handle both network errors and our custom thrown errors
+      alert(
+        `${error instanceof Error ? error.message : "Could not connect to backend."}`,
+      );
+    } finally {
+      setIsExecuting(false);
+    }
   };
+  const handleClearAll = () => {
+    if (nodes.length === 0) {
+      return;
+    }
 
-  const handleDownloadVideo = (url: string) => {
-    alert(`Simulating download of video from: ${url}`);
+    const confirmClear = window.confirm(
+      "Are you sure you want to clear the entire canvas? This cannot be undone.",
+    );
+
+    if (confirmClear) {
+      setNodes([]);
+      setEdges([]);
+    }
   };
-
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node<t_CustomNodeData>>[]) => {
       onNodesChange(changes);
@@ -124,13 +256,6 @@ const SourcePageContent = () => {
         ),
       ),
     [setEdges],
-  );
-
-  const onNodeClick: NodeMouseHandler<Node<t_CustomNodeData>> = useCallback(
-    (_, node) => {
-      setSelectedNode(node);
-    },
-    [],
   );
 
   const findBranchNodesAndEdges = (startNodeId: string, allEdges: Edge[]) => {
@@ -224,84 +349,42 @@ const SourcePageContent = () => {
 
   // Add New Node logic remains the same
   const addNewNode = (type: string) => {
-    const defaultData = {
-      parent: {
-        label: `New Parent ${nodeIdCounter}`,
-        description: "Enter main goal in chat",
-        status: "Ready",
-        chatHistory: [],
-      },
-      child: {
-        label: `New Child ${nodeIdCounter}`,
-        description: "Configure child prompt",
-        status: "Ready",
-      },
-      mloutput: {
-        label: "ML Output",
-        description: "The output generated by the machine learning model.",
-        inputCount: 3,
-        clusterID: null,
-        modelLink: null,
-      },
-      textOP: {
-        label: `Text Output ${nodeIdCounter}`,
-        content: `Analysis complete: Status report for Node ${nodeIdCounter} ready.`,
-      },
-      basemodel: {
-        label: `Base Model ${nodeIdCounter}`,
-        description: "Custom merge operation.",
-        inputCount: 3,
-      },
+    // Basic auto-layout logic: just stack them downwards for now
+    const newY =
+      nodes.length > 0
+        ? Math.max(...nodes.map((n) => n.position.y)) + 150
+        : 100;
 
-      evaluation: {
-        label: `evaluation ${nodeIdCounter}`,
-        language: "JavaScript",
-        status: "Ready",
-        executedCount: 0,
-      },
-      summary: {
-        label: `Final Report ${nodeIdCounter}`,
-        content: "Awaiting inputs for final synthesis...",
-        description: "Consolidates text/data inputs into a final report.",
-        inputCount: 3,
-      },
-    };
+    let defaultData = {};
 
-    if (type === "dataset") {
-      const parentNodes = nodes.filter((n) => n.type === "dataset");
-
-      if (parentNodes.length > 0) {
-        const maxX = parentNodes.reduce(
-          (max, node) => Math.max(max, node.position.x),
-          0,
-        );
-
-        setXPos(maxX + HORIZONTAL_BRANCH_SPACING);
-        setYPos(50);
-      } else {
-        setXPos(600);
-        setYPos(50);
-      }
+    // Inject the exact schema our Side Panel expects
+    switch (type) {
+      case "source_head":
+        defaultData = { src_name: "", base_url: "" };
+        break;
+      case "endpoint":
+        defaultData = { table_name: "", method: "GET", endpoint: "" };
+        break;
+      case "params":
+        defaultData = { params: "" };
+        break;
+      case "columns":
+        defaultData = { rows_path: "", columns: "" };
+        break;
+      case "test_queries":
+        defaultData = { test_query: "" };
+        break;
     }
-    const Deftype = type as keyof typeof defaultData;
-    const newNode: Node<t_CustomNodeData> = {
+
+    const newNode: Node = {
       id: `${nodeIdCounter++}`,
       type: type,
-      position: { x: xPos, y: yPos },
-      data: defaultData[Deftype] || {
-        label: `New ${type}`,
-        description: "Configure me",
-      },
+      position: { x: 250, y: newY }, // Center it in the view
+      data: defaultData,
     };
+
     setNodes((nds) => [...nds, newNode]);
   };
-
-  const getSelectedNodeData = () => {
-    if (!selectedNode) return null;
-    return nodes.find((node) => node.id === selectedNode.id);
-  };
-
-  const currentSelectedNode = getSelectedNodeData();
 
   return (
     <div className="w-full h-[90vh] bg-linear-to-br from-gray-950 via-gray-900 to-gray-950 flex flex-col overflow-hidden">
@@ -423,18 +506,58 @@ const SourcePageContent = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {/* Enhanced stats display */}
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/50 rounded-lg border border-gray-700/50 transition-all hover:border-emerald-500/50 hover:scale-105 duration-200">
-              <Workflow className="w-4 h-4 text-emerald-400" />
-              <span className="font-semibold text-white">{nodes.length}</span>
-              <span className="text-gray-400">Nodes</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleExecuteAll}
+                disabled={isExecuting}
+                className={`"group px-5 py-2 cursor-pointer text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-emerald-500/50 flex items-center gap-2 border " ${
+                  isExecuting
+                    ? "bg-gray-600 cursor-not-allowed"
+                    : "bg-linear-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 border-emerald-400/50 hover:border-emerald-400 hover:shadow-emerald-500/70"
+                }`}
+              >
+                {isExecuting ? (
+                  <svg
+                    className="animate-spin h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                ) : (
+                  <span className="text-lg leading-none">▶</span>
+                )}
+                {isExecuting ? "Executing..." : "Execute"}
+              </button>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/50 rounded-lg border border-gray-700/50 transition-all hover:border-emerald-500/50 hover:scale-105 duration-200">
-              <Grid className="w-4 h-4 text-emerald-400" />
-              <span className="font-semibold text-white">{edges.length}</span>
-              <span className="text-gray-400">Edges</span>
-            </div>
+            <button
+              onClick={handleClearAll}
+              className="group px-2 py-2 cursor-pointer bg-linear-to-r from-orange-800 to-red-600 hover:from-orange-900 hover:to-red-700 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 text-sm font-bold shadow-xl shadow-orange-500/50 flex items-center gap-2 border border-orange-400/50 hover:border-orange-400 hover:shadow-orange-500/70"
+            >
+              <Trash size={20} stroke="white" />
+              <p className="text-white text-lg">Clear All</p>
+            </button>
+            <button
+              onClick={() => setShowAIModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 border border-purple-500/50 rounded-xl transition-all font-bold text-sm shadow-[0_0_15px_rgba(168,85,247,0.2)] hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]"
+            >
+              <Sparkles className="w-4 h-4" />
+              AI Assist
+            </button>
           </div>
         </div>
       </div>
@@ -462,7 +585,6 @@ const SourcePageContent = () => {
             onBeforeDelete={async () => {
               return confirm("Are you sure you want to DELETE this node?");
             }}
-            onNodeClick={onNodeClick}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             deleteKeyCode={["Backspace", "Delete"]}
@@ -489,22 +611,16 @@ const SourcePageContent = () => {
                 maskColor="rgba(100, 100, 100, 0.4)"
                 nodeColor={(node) => {
                   switch (node.type) {
-                    case "dataset":
-                      return "#10b981";
-                    case "basemodel":
-                      return "#3b82f6";
-                    case "mloutput":
-                      return "#f59e0b";
-                    case "evaluation":
-                      return "#8b5cf6";
-                    case "promptdataset":
-                      return "green";
-                    case "rlconfig":
-                      return "#f97316";
-                    case "codeBlock":
-                      return "#14b8a6";
-                    case "summary":
-                      return "#ec4899";
+                    case "source_head":
+                      return "#a855f7"; // purple-500
+                    case "endpoint":
+                      return "#3b82f6"; // blue-500
+                    case "params":
+                      return "#eab308"; // yellow-500
+                    case "columns":
+                      return "#22c55e"; // green-500
+                    case "test_queries":
+                      return "#ef4444"; // red-500
                     default:
                       return "#6b7280";
                   }
@@ -515,28 +631,31 @@ const SourcePageContent = () => {
           </ReactFlow>
 
           {/* Configuration Panel (Right Sidebar) - Now using the dedicated component */}
-          {currentSelectedNode && (
-            <NodeConfigPanel
-              key={currentSelectedNode.id}
-              node={currentSelectedNode as Node<t_CustomNodeData>}
+          <div
+            className={`absolute top-0 right-0 h-full z-50 transition-transform duration-300 ease-in-out shadow-2xl ${
+              currentSelectedNode ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            <NodeSidePanel
+              selectedNode={currentSelectedNode}
               setNodes={setNodes}
-              setSelectedNode={setSelectedNode}
-              handleSimulateMerge={handleSimulateMerge}
-              handleCopyToClipboard={handleCopyToClipboard}
-              handleDownloadVideo={handleDownloadVideo}
             />
-          )}
+          </div>
         </div>
       </div>
+      <AIModal
+        isOpen={showAIModal}
+        onClose={() => setShowAIModal(false)}
+        setNodes={setNodes}
+        setEdges={setEdges}
+      />
     </div>
   );
 };
 const SourcePage = () => {
   return (
     <ReactFlowProvider>
-      <ClusterIDProvider>
-        <SourcePageContent />
-      </ClusterIDProvider>
+      <SourcePageContent />
     </ReactFlowProvider>
   );
 };
